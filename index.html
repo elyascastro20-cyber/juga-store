@@ -626,6 +626,22 @@ select.ctl{padding:10px 12px}
   .pays2{grid-template-columns:repeat(3,1fr)}
 }
 
+/* auth */
+#admin.auth{grid-template-columns:1fr;background:linear-gradient(160deg,#f7efe9,#f1dcd6)}
+#admin.auth .ad-side{display:none}
+#admin.auth #adminMain{max-width:none;display:grid;place-items:center;min-height:100vh;padding:30px 16px}
+.login{background:#fff;border-radius:18px;box-shadow:0 30px 70px -35px rgba(42,30,44,.5);padding:36px 34px;width:min(400px,100%);display:flex;flex-direction:column;gap:10px}
+.login img{height:44px;align-self:flex-start}
+.lg-tag{font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--rose);font-weight:600;margin-top:4px}
+.login h1{font-size:24px;font-weight:600;margin-top:6px}
+.login form{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.login form .lb{margin-top:8px}
+.login form .b{margin-top:14px;height:44px}
+.lg-links{display:flex;justify-content:space-between;margin-top:6px}
+.login>.lnk2{align-self:center;margin-top:8px;color:#857a81}
+.note.okn{background:#e8f5ee;color:#23704a}
+.loading-a,.loading-s{padding:120px 20px;text-align:center;color:#857a81;font-size:15px}
+
 /* ---------- Responsive ---------- */
 @media (max-width:1080px){
   .grid{grid-template-columns:repeat(3,1fr)}
@@ -734,6 +750,7 @@ select.ctl{padding:10px 12px}
 <div class="modal" id="modal"><div class="modal-box" id="modalBox"></div></div>
 <div class="toast" id="toast"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12.5l4.5 4.5L19 7"/></svg><span id="toastTxt"></span></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ================= ICONS ================= */
 const I = {
@@ -861,7 +878,7 @@ function load(){
   DB.receivables.forEach((r,i)=>{if(i%3)r.status='paid'});
 }
 function fwd(n){const x=new Date();x.setDate(x.getDate()+n);return x.toISOString().slice(0,10)}
-function save(){try{localStorage.setItem(LS,JSON.stringify(DB))}catch(e){}}
+function localSave(){try{localStorage.setItem(LS,JSON.stringify(DB))}catch(e){}}
 const state={cat:'todos',q:'',sort:'new',cart:[],adminTab:'dashboard',orderFilter:'all',finTab:'receivables',pdv:{items:[],pay:'pix',inst:2,customer:''},checkout:{step:1,shipping:null,payment:null,data:{}}};
 try{state.cart=JSON.parse(localStorage.getItem(LS+'.cart')||'[]')}catch(e){}
 function saveCart(){try{localStorage.setItem(LS+'.cart',JSON.stringify(state.cart))}catch(e){}}
@@ -1330,7 +1347,7 @@ window.addEventListener('hashchange',route);
 function route(){
   SV.timers.forEach(clearInterval);SV.timers=[];closeAll();
   const h=location.hash.slice(1);
-  if(h==='gestao'){$('store').classList.add('hidden');$('admin').classList.remove('hidden');renderAdmin();window.scrollTo(0,0);return}
+  if(h==='gestao'){if(REMOTE&&!ADMIN){renderLogin();return}$('store').classList.add('hidden');$('admin').classList.remove('hidden');renderAdmin();window.scrollTo(0,0);return}
   $('admin').classList.add('hidden');$('store').classList.remove('hidden');
   renderChrome();
   const m=$('storeMain');
@@ -1654,10 +1671,185 @@ function openModal(){$('modal').classList.add('on');$('scrim').classList.add('on
 function closeAll(){$('modal').classList.remove('on');$('drawer').classList.remove('on');$('adPanel').classList.remove('on');$('scrim').classList.remove('on');setTimeout(()=>{if(!$('modal').classList.contains('on'))$('modalBox').style.width=''},300)}
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeAll()});
 
+/* ================= REMOTE (Supabase) ================= */
+const SB_URL='https://jnpfedfeyuwukoggbbxm.supabase.co',SB_KEY='sb_publishable_l18Zo1AiRcWWhk_8Z9IyFA_N1r9UFV3';
+const REMOTE=!!(SB_URL&&SB_KEY&&!SB_URL.startsWith('/*')&&window.supabase);
+const sb=REMOTE?window.supabase.createClient(SB_URL,SB_KEY):null;
+let ADMIN=false,SESSION=null,SNAP={},saveTimer=null,saving=Promise.resolve(),refreshTimer=null;
+const COLS={products:'products',orders:'orders',receivables:'receivables',payables:'payables',coupons:'coupons',stockMoves:'stock_moves'};
+function snap(keys=Object.keys(COLS)){keys.forEach(k=>{SNAP[k]={};(DB[k]||[]).forEach(r=>SNAP[k][r.id]=JSON.stringify(r))});SNAP.brand=JSON.stringify(DB.brand)}
+async function fetchAll(table){let out=[],from=0;for(;;){const {data,error}=await sb.from(table).select('data').range(from,from+999);if(error)throw error;out=out.concat(data.map(r=>r.data));if(data.length<1000)break;from+=1000}return out}
+async function loadRemote(){
+  const [s,p,c]=await Promise.all([sb.from('settings').select('data').eq('id','brand').maybeSingle(),fetchAll('products'),fetchAll('coupons')]);
+  if(s.error)throw s.error;
+  DB={products:p.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')),coupons:c,orders:[],receivables:[],payables:[],stockMoves:[],brand:{...DEFAULT_BRAND,...(s.data?.data||{})}};
+  if(ADMIN){const [o,r,pa,m]=await Promise.all(['orders','receivables','payables','stock_moves'].map(fetchAll));
+    DB.orders=o.sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));DB.receivables=r;DB.payables=pa;DB.stockMoves=m.sort((a,b)=>String(b.at).localeCompare(String(a.at)))}
+  snap();
+}
+function save(){
+  if(!REMOTE){localSave();return}
+  if(!ADMIN)return;
+  clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saving=saving.then(pushChanges)},200);
+}
+async function flush(){clearTimeout(saveTimer);saving=saving.then(pushChanges);await saving}
+async function pushChanges(){
+  try{
+    for(const [k,t] of Object.entries(COLS)){
+      const rows=DB[k]||[],cur={};rows.forEach(r=>cur[r.id]=JSON.stringify(r));
+      const prev=SNAP[k]||{};
+      const up=rows.filter(r=>prev[r.id]!==cur[r.id]).map(r=>({id:r.id,data:r,updated_at:new Date().toISOString()}));
+      for(let i=0;i<up.length;i+=200){const {error}=await sb.from(t).upsert(up.slice(i,i+200));if(error)throw error}
+      if(k!=='stockMoves'){const del=Object.keys(prev).filter(id=>!(id in cur));if(del.length){const {error}=await sb.from(t).delete().in('id',del);if(error)throw error}}
+      SNAP[k]=k==='stockMoves'?{...prev,...cur}:cur;
+    }
+    const b=JSON.stringify(DB.brand);if(b!==SNAP.brand){const {error}=await sb.from('settings').upsert({id:'brand',data:DB.brand,updated_at:new Date().toISOString()});if(error)throw error;SNAP.brand=b}
+  }catch(e){console.error(e);toast('Não foi possível salvar: '+(e.message||e))}
+}
+async function refreshData(silent){
+  if(!REMOTE)return;await flush();
+  try{await loadRemote();migrate();if(!$('admin').classList.contains('hidden')&&ADMIN)renderAdmin();if(!silent)toast('Dados atualizados')}catch(e){if(!silent)toast('Erro ao atualizar: '+e.message)}
+}
+function startAutoRefresh(){clearInterval(refreshTimer);refreshTimer=setInterval(()=>{const busy=$('modal').classList.contains('on')||$('adPanel').classList.contains('on')||$('admin').classList.contains('hidden')||['pdv','settings'].includes(A.tab);if(!busy&&ADMIN)refreshData(true)},60000)}
+
+/* ---------- auth ---------- */
+const AUTH_REDIRECT=()=>location.origin+location.pathname;
+function authShell(inner){
+  $('store').classList.add('hidden');$('admin').classList.remove('hidden');$('admin').classList.add('auth');$('adSide').innerHTML='';
+  $('adminMain').innerHTML=`<div class="login"><img src="${logoSrc()}" alt="JUGA"><div class="lg-tag">Gestão da loja</div>${inner}<button class="lnk2" onclick="goStore()">← Voltar para a loja</button></div>`;
+}
+function renderLogin(msg='',ok=''){
+  authShell(`<h1>Entrar</h1><p class="muted">Acesso restrito à equipe da loja.</p>${msg?`<div class="note bad">${msg}</div>`:''}${ok?`<div class="note okn">${ok}</div>`:''}
+  <form onsubmit="doLogin(event)"><label class="lb">E-mail</label><input class="in" id="lg_e" type="email" required autocomplete="username"><label class="lb">Senha</label><input class="in" id="lg_p" type="password" required autocomplete="current-password"><button class="b b-pri b-full" id="lg_b">Entrar</button></form>
+  <div class="lg-links"><button class="lnk2" onclick="renderSignup()">Primeiro acesso</button><button class="lnk2" onclick="forgot()">Esqueci minha senha</button></div>`);
+}
+function renderSignup(msg=''){
+  authShell(`<h1>Primeiro acesso</h1><p class="muted">Use o e-mail que foi liberado na gestão e crie sua senha.</p>${msg?`<div class="note bad">${msg}</div>`:''}
+  <form onsubmit="doSignup(event)"><label class="lb">E-mail</label><input class="in" id="su_e" type="email" required autocomplete="username"><label class="lb">Crie uma senha (mín. 8 caracteres)</label><input class="in" id="su_p" type="password" minlength="8" required autocomplete="new-password"><button class="b b-pri b-full">Criar acesso</button></form>
+  <div class="lg-links"><button class="lnk2" onclick="renderLogin()">Já tenho senha</button></div>`);
+}
+function renderSetPassword(msg=''){
+  authShell(`<h1>Definir nova senha</h1>${msg?`<div class="note bad">${msg}</div>`:''}<form onsubmit="doSetPass(event)"><label class="lb">Nova senha (mín. 8 caracteres)</label><input class="in" id="np_1" type="password" minlength="8" required autocomplete="new-password"><label class="lb">Repita a senha</label><input class="in" id="np_2" type="password" minlength="8" required autocomplete="new-password"><button class="b b-pri b-full">Salvar senha</button></form>`);
+}
+async function doLogin(e){e.preventDefault();const b=$('lg_b');b.disabled=true;b.textContent='Entrando…';
+  const {data,error}=await sb.auth.signInWithPassword({email:$('lg_e').value.trim(),password:$('lg_p').value});
+  if(error){renderLogin(/confirm/i.test(error.message)?'Confirme seu e-mail pelo link que enviamos antes de entrar.':'E-mail ou senha inválidos.');return}
+  await afterAuth(data.session);
+}
+async function doSignup(e){e.preventDefault();const email=$('su_e').value.trim();
+  const {data,error}=await sb.auth.signUp({email,password:$('su_p').value,options:{emailRedirectTo:AUTH_REDIRECT()+'#gestao'}});
+  if(error){renderSignup(/registered|exists/i.test(error.message)?'Esse e-mail já tem acesso. Use “Já tenho senha” ou “Esqueci minha senha”.':error.message);return}
+  if(data.session){await afterAuth(data.session);return}
+  renderLogin('',`Enviamos um link de confirmação para ${esc(email)}. Confirme e depois entre com sua senha.`);
+}
+async function forgot(){const e=($('lg_e')?.value||'').trim();if(!e){toast('Digite seu e-mail no campo acima');return}
+  const {error}=await sb.auth.resetPasswordForEmail(e,{redirectTo:AUTH_REDIRECT()});
+  renderLogin('',error?'':`Se ${esc(e)} tiver acesso, você vai receber um link para criar uma nova senha.`);if(error)toast(error.message)}
+async function doSetPass(e){e.preventDefault();if($('np_1').value!==$('np_2').value){renderSetPassword('As senhas não conferem.');return}
+  const {error}=await sb.auth.updateUser({password:$('np_1').value});if(error){renderSetPassword(error.message);return}
+  toast('Senha salva');const {data}=await sb.auth.getSession();await afterAuth(data.session)}
+async function afterAuth(session){
+  SESSION=session;const r=await sb.rpc('is_admin');ADMIN=!r.error&&r.data===true;
+  if(!ADMIN){await sb.auth.signOut();SESSION=null;renderLogin('Este e-mail ainda não foi liberado para a gestão. Peça ao administrador.');return}
+  $('adminMain').innerHTML='<div class="loading-a">Carregando dados da loja…</div>';
+  await loadRemote();migrate();startAutoRefresh();
+  if(location.hash!=='#gestao')history.replaceState(null,'','#gestao');route();
+}
+async function logout(){await flush();await sb.auth.signOut();ADMIN=false;SESSION=null;clearInterval(refreshTimer);await loadRemote();go('inicio');toast('Você saiu da gestão')}
+
+/* ---------- overrides (remote) ---------- */
+async function uploadImg(dataUrl,id){
+  try{const blob=await (await fetch(dataUrl)).blob();const path=`${id}-${Date.now()}.jpg`;
+    const {error}=await sb.storage.from('produtos').upload(path,blob,{contentType:'image/jpeg',upsert:true});if(error)throw error;
+    return sb.storage.from('produtos').getPublicUrl(path).data.publicUrl}catch(e){toast('Erro ao enviar foto: '+e.message);return null}
+}
+const _saveProduct=saveProduct;
+saveProduct=async function(){
+  if(REMOTE&&draft&&draft.imageUrl&&draft.imageUrl.startsWith('data:')){toast('Enviando foto…');const url=await uploadImg(draft.imageUrl,draft.id);if(!url)return;draft.imageUrl=url}
+  _saveProduct();
+};
+const _placeOrder=placeOrder;
+placeOrder=async function(){
+  if(!REMOTE)return _placeOrder();
+  const d=SV.data;
+  if(!d.name||!d.phone||!d.street||!d.num){toast('Preencha nome, WhatsApp e endereço completo');return}
+  const btn=[...document.querySelectorAll('.box .btn-rose')].pop();if(btn){btn.disabled=true;btn.textContent='Enviando pedido…'}
+  const l=cartLines();
+  const addr=[`${d.street}, ${d.num}${d.comp?' ('+d.comp+')':''}`,d.district,d.city,d.cep].filter(x=>x&&String(x).trim()).join(' — ');
+  const {data,error}=await sb.rpc('place_order',{p:{customerName:d.name,customerEmail:d.email||'',customerPhone:d.phone,customerAddress:addr,
+    items:l.map(c=>({productId:c.productId,selectedSize:c.selectedSize,selectedColor:c.selectedColor,quantity:c.quantity})),
+    shippingId:SV.ship,paymentMethod:SV.pay,coupon:SV.coupon?.code||null}});
+  if(error){toast(error.message.replace(/^.*?:\s*/,''));if(btn){btn.disabled=false;btn.textContent='Confirmar pedido'}try{DB.products=await fetchAll('products');snap(['products'])}catch(e){}return}
+  state.cart=[];saveCart();SV.coupon=null;SV.last=data;updateCounts();
+  try{DB.products=(await fetchAll('products')).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));snap(['products'])}catch(e){}
+  go('pedido-confirmado');
+};
+const _doTrack=doTrack;
+doTrack=async function(){
+  if(!REMOTE)return _doTrack();
+  const q=$('trackQ').value.trim();if(!q)return;$('trackRes').innerHTML='<p class="muted" style="margin-top:14px">Buscando…</p>';
+  const {data,error}=await sb.rpc('track_order',{q});const f=error?[]:(data||[]);
+  const flow=['pending','preparing','shipped','completed'];
+  $('trackRes').innerHTML=f.length?f.map(o=>{const ix=flow.indexOf(o.status);return `<div style="border:1px solid var(--line);padding:18px;margin-top:18px"><div class="row"><b>Pedido ${o.id}</b><span class="muted" style="font-size:13px">${fmtDate(o.createdAt)}</span><span class="right st-pill st-${o.status}">${STATUS[o.status]}</span></div>${o.status==='cancelled'?'<p class="muted" style="margin-top:10px">Pedido cancelado.</p>':`<div class="timeline">${flow.map((s,i)=>`<div class="st ${i<=ix?'done':''}"><div class="bub">${i<=ix?I.check:''}</div>${STATUS[s]}</div>`).join('')}</div>`}<div class="muted" style="font-size:13px">${(o.items||[]).map(i=>`${i.quantity}× ${esc(i.name)}`).join(' · ')} — <b style="color:var(--ink)">${brl(o.totalAmount)}</b></div></div>`}).join(''):`<div class="empty" style="padding:30px 0">Nenhum pedido encontrado.</div>`;
+};
+const _pdvFinish=pdvFinish;
+pdvFinish=async function(){
+  if(!REMOTE)return _pdvFinish();
+  const pv=A.pdv;await flush();
+  const {data,error}=await sb.rpc('place_order',{p:{saleType:'pos',customerName:pv.customer||'',customerPhone:pv.phone||'',items:pv.items.map(i=>({productId:i.productId,selectedSize:i.selectedSize,selectedColor:i.selectedColor,quantity:i.quantity})),paymentMethod:pv.pay,installments:pv.inst,discount:+pv.disc||0}});
+  if(error){toast(error.message.replace(/^.*?:\s*/,''));return}
+  A.pdv={items:[],pay:'pix',inst:2,customer:'',phone:'',disc:0};await refreshData(true);toast(`Venda ${data.id} registrada · ${brl(data.totalAmount)}`);
+};
+const _resetDemo=resetDemo;
+resetDemo=function(){
+  if(!REMOTE)return _resetDemo();
+  $('modalBox').style.width='min(460px,100%)';
+  $('modalBox').innerHTML=`<div style="padding:30px"><h3 class="mh">Restaurar dados de exemplo?</h3><p class="muted" style="margin:8px 0 20px">Isso <b>apaga todos</b> os produtos, pedidos, contas e cupons do banco e coloca os dados de demonstração no lugar. Configurações e acessos são mantidos.</p><div class="row-b" style="justify-content:flex-end"><button class="b" onclick="closeAll()">Cancelar</button><button class="b b-dng" id="rsBtn" onclick="doResetRemote()">Apagar e restaurar</button></div></div>`;openModal();
+};
+async function doResetRemote(){
+  $('rsBtn').disabled=true;$('rsBtn').textContent='Restaurando…';await flush();
+  try{for(const t of Object.values(COLS)){const {error}=await sb.from(t).delete().neq('id','__none__');if(error)throw error}
+    const brand=DB.brand;try{localStorage.removeItem(LS)}catch(e){}load();DB.brand=brand;
+    Object.keys(COLS).forEach(k=>SNAP[k]={});migrate();await flush();closeAll();await refreshData(true);toast('Dados de exemplo restaurados')}
+  catch(e){toast('Erro: '+e.message);closeAll()}
+}
+const _renderAdmin=renderAdmin;
+renderAdmin=function(){
+  $('admin').classList.remove('auth');_renderAdmin();
+  if(REMOTE&&ADMIN){const f=document.querySelector('.ad-foot');if(f)f.insertAdjacentHTML('beforeend',`<button class="ad-ret" onclick="refreshData()">↻ <span>Atualizar dados</span></button><button class="ad-ret" onclick="logout()" title="${esc(SESSION?.user?.email||'')}">⎋ <span>Sair</span></button>`)}
+};
+const _aSettings=aSettings;
+aSettings=function(){
+  _aSettings();
+  if(!(REMOTE&&ADMIN))return;
+  const host=document.querySelector('#adminMain .g2>div:last-child');
+  if(host)host.insertAdjacentHTML('afterbegin',`<div class="cd" id="accCard"><div class="cd-h"><h3>Acessos à gestão</h3></div><p class="muted" style="font-size:12.5px;margin-bottom:10px">Quem estiver nesta lista entra em <b>${esc(location.host)}/#gestao</b> → “Primeiro acesso” e cria a própria senha.</p><div id="accList" class="muted">Carregando…</div><div class="row-b"><input class="in" id="acc_e" type="email" placeholder="email@exemplo.com" style="flex:1"><button class="b b-pri" onclick="addAccess()">Liberar</button></div></div>`);
+  loadAccess();
+};
+async function loadAccess(){const {data,error}=await sb.from('admins').select('email').order('created_at');const el=$('accList');if(!el)return;
+  el.innerHTML=error?'Erro ao carregar':data.map(a=>`<div class="sr"><span>${esc(a.email)}${a.email.toLowerCase()===(SESSION?.user?.email||'').toLowerCase()?' <span class="pill st-completed">você</span>':''}</span>${a.email.toLowerCase()===(SESSION?.user?.email||'').toLowerCase()?'':`<button class="b b-sm b-dng" onclick="rmAccess('${esc(a.email)}')">Remover</button>`}</div>`).join('')}
+async function addAccess(){const e=$('acc_e').value.trim().toLowerCase();if(!/^\S+@\S+\.\S+$/.test(e)){toast('E-mail inválido');return}const {error}=await sb.from('admins').upsert({email:e});if(error){toast(error.message);return}$('acc_e').value='';loadAccess();toast('Acesso liberado para '+e)}
+async function rmAccess(e){const {error}=await sb.from('admins').delete().eq('email',e);if(error){toast(error.message);return}loadAccess();toast('Acesso removido')}
+
 /* ---------- boot ---------- */
-load();migrate();
-DB.brand.heroTitle=DB.brand.heroTitle||'Vista o que te faz <em>sentir</em> você.';
-route();
+async function boot(){
+  if(!REMOTE){load();migrate();DB.brand.heroTitle=DB.brand.heroTitle||'Vista o que te faz <em>sentir</em> você.';route();return}
+  $('storeMain').innerHTML='<div class="loading-s">Carregando a loja…</div>';
+  let recovery=/type=(recovery|invite)/.test(location.hash);
+  const hadToken=/access_token|error_description|type=signup/.test(location.hash);
+  sb.auth.onAuthStateChange(ev=>{if(ev==='PASSWORD_RECOVERY')recovery=true});
+  const {data:{session}}=await sb.auth.getSession();
+  if(session){SESSION=session;const r=await sb.rpc('is_admin');ADMIN=!r.error&&r.data===true}
+  try{await loadRemote()}catch(e){$('storeMain').innerHTML=`<div class="wrap"><div class="empty"><div class="serif">Não foi possível carregar a loja</div>${esc(e.message||'')}<br><button class="btn btn-dark" style="margin-top:20px" onclick="location.reload()">Tentar novamente</button></div></div>`;return}
+  migrate();DB.brand.heroTitle=DB.brand.heroTitle||'Vista o que te faz <em>sentir</em> você.';
+  if(ADMIN)startAutoRefresh();
+  if(session&&recovery){history.replaceState(null,'',location.pathname+'#gestao');renderSetPassword();return}
+  if(hadToken)history.replaceState(null,'',location.pathname+'#gestao');
+  route();
+}
+
+/* ---------- boot ---------- */
+boot();
 </script>
 </body>
 </html>
