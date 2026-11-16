@@ -1725,7 +1725,7 @@ function renderLogin(msg='',ok=''){
 }
 function renderSignup(msg=''){
   authShell(`<h1>Primeiro acesso</h1><p class="muted">Use o e-mail que foi liberado na gestão e crie sua senha.</p>${msg?`<div class="note bad">${msg}</div>`:''}
-  <form onsubmit="doSignup(event)"><label class="lb">E-mail</label><input class="in" id="su_e" type="email" required autocomplete="username"><label class="lb">Crie uma senha (mín. 8 caracteres)</label><input class="in" id="su_p" type="password" minlength="8" required autocomplete="new-password"><button class="b b-pri b-full">Criar acesso</button></form>
+  <form onsubmit="doSignup(event)"><label class="lb">E-mail</label><input class="in" id="su_e" type="email" required autocomplete="username"><label class="lb">Crie uma senha (mín. 8 caracteres)</label><input class="in" id="su_p" type="password" minlength="8" required autocomplete="new-password"><button class="b b-pri b-full" id="su_b">Criar acesso</button></form>
   <div class="lg-links"><button class="lnk2" onclick="renderLogin()">Já tenho senha</button></div>`);
 }
 function renderSetPassword(msg=''){
@@ -1736,9 +1736,9 @@ async function doLogin(e){e.preventDefault();const b=$('lg_b');b.disabled=true;b
   if(error){renderLogin(/confirm/i.test(error.message)?'Confirme seu e-mail pelo link que enviamos antes de entrar.':'E-mail ou senha inválidos.');return}
   await afterAuth(data.session);
 }
-async function doSignup(e){e.preventDefault();const email=$('su_e').value.trim();
+async function doSignup(e){e.preventDefault();const b=$('su_b');if(b.disabled)return;b.disabled=true;b.textContent='Criando acesso…';const email=$('su_e').value.trim();
   const {data,error}=await sb.auth.signUp({email,password:$('su_p').value,options:{emailRedirectTo:AUTH_REDIRECT()+'#gestao'}});
-  if(error){renderSignup(/registered|exists/i.test(error.message)?'Esse e-mail já tem acesso. Use “Já tenho senha” ou “Esqueci minha senha”.':error.message);return}
+  if(error){renderSignup(/registered|exists|database error saving/i.test(error.message)?'Esse e-mail já foi cadastrado. Confirme pelo link enviado ao e-mail e depois use “Já tenho senha”.':/rate limit/i.test(error.message)?'Muitas tentativas em pouco tempo. Aguarde alguns minutos e tente de novo.':error.message);return}
   if(data.session){await afterAuth(data.session);return}
   renderLogin('',`Enviamos um link de confirmação para ${esc(email)}. Confirme e depois entre com sua senha.`);
 }
